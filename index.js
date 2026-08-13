@@ -463,7 +463,7 @@ const limiter = rateLimit({
   legacyHeaders: false,
 });
 
-app.use('/api/', limiter);
+app.use(limiter);
 
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
@@ -475,6 +475,18 @@ app.get('/', (req, res) => {
     success: true,
     message: 'TourNest API is running',
     version: '1.0.0',
+  });
+});
+
+app.get('/health', async (req, res) => {
+  const dbHealthy = await isHealthy();
+
+  res.json({
+    success: true,
+    server: 'healthy',
+    database: dbHealthy ? 'connected' : 'disconnected',
+    environment: process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString(),
   });
 });
 
