@@ -167,6 +167,7 @@ async function closeDatabase() {
  */
 function initializeFirebase() {
   if (firebaseApp) {
+    console.log('[AUTH] Firebase Admin already initialized');
     return firebaseApp;
   }
 
@@ -174,9 +175,14 @@ function initializeFirebase() {
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const privateKey = process.env.FIREBASE_PRIVATE_KEY;
 
+  console.log('[AUTH] Firebase Admin initialization check:');
+  console.log('[AUTH] - Project ID:', projectId || 'NOT_SET');
+  console.log('[AUTH] - Client Email:', clientEmail || 'NOT_SET');
+  console.log('[AUTH] - Private Key:', privateKey ? 'PRESENT' : 'NOT_SET');
+
   if (!projectId || !clientEmail || !privateKey) {
-    console.warn('⚠️ Firebase credentials not configured. Firebase token verification will not work.');
-    console.warn('Required: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY');
+    console.error('[AUTH] ⚠️ Firebase credentials not configured. Firebase token verification will not work.');
+    console.error('[AUTH] Required: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY');
     return null;
   }
 
@@ -193,10 +199,11 @@ function initializeFirebase() {
       credential: admin.credential.cert(credentials),
     });
 
-    console.log('✅ Firebase Admin initialized successfully');
+    console.log('[AUTH] ✅ Firebase Admin initialized successfully');
     return firebaseApp;
   } catch (error) {
-    console.error('❌ Firebase Admin initialization error:', error.message);
+    console.error('[AUTH] ❌ Firebase Admin initialization error:', error.message);
+    console.error('[AUTH] Error details:', error);
     return null;
   }
 }
@@ -206,15 +213,18 @@ function initializeFirebase() {
  */
 async function verifyFirebaseToken(token) {
   if (!firebaseApp) {
-    console.warn('Firebase Admin not initialized');
+    console.error('[AUTH] Firebase Admin not initialized - cannot verify token');
     return null;
   }
 
   try {
+    console.log('[AUTH] Attempting to verify Firebase token...');
     const decodedToken = await admin.auth().verifyIdToken(token);
+    console.log('[AUTH] Firebase token verified successfully for UID:', decodedToken.uid);
     return decodedToken;
   } catch (error) {
-    console.error('Firebase token verification error:', error.message);
+    console.error('[AUTH] Firebase token verification error:', error.message);
+    console.error('[AUTH] Error code:', error.code);
     return null;
   }
 }
@@ -505,7 +515,7 @@ async function authenticate(req, res, next) {
 
     const database = getDb();
     const user = await database.collection('users').findOne(
-      { _id: decoded.userId },
+      { _id: new ObjectId(decoded.userId) },
       { projection: { _id: 1, name: 1, email: 1, photoURL: 1, role: 1 } }
     );
 
@@ -546,7 +556,7 @@ async function optionalAuth(req, res, next) {
       if (decoded) {
         const database = getDb();
         const user = await database.collection('users').findOne(
-          { _id: decoded.userId },
+          { _id: new ObjectId(decoded.userId) },
           { projection: { _id: 1, name: 1, email: 1, photoURL: 1, role: 1 } }
         );
 
@@ -998,10 +1008,29 @@ async function login(req, res) {
   try {
     const { firebaseToken } = req.body;
 
+    // Debug: Log login attempt (without exposing the token)
+    console.log('[AUTH] Login attempt received');
+    console.log('[AUTH] Firebase token present:', !!firebaseToken);
+    console.log('[AUTH] Token length:', firebaseToken?.length || 0);
+
+    // Debug: Check Firebase Admin status
+    console.log('[AUTH] Firebase Admin initialized:', !!firebaseApp);
+    console.log('[AUTH] Firebase Project ID:', process.env.FIREBASE_PROJECT_ID || 'NOT_SET');
+
+    if (!firebaseToken) {
+      console.error('[AUTH] Missing Firebase token');
+      return sendError(res, 'Firebase token is required', null, 400);
+    }
+
     const decodedFirebase = await verifyFirebaseToken(firebaseToken);
     if (!decodedFirebase) {
+      console.error('[AUTH] Firebase token verification failed');
       return sendError(res, 'Invalid Firebase token', null, 401);
     }
+
+    console.log('[AUTH] Firebase token verified successfully');
+    console.log('[AUTH] Firebase UID:', decodedFirebase.uid);
+    console.log('[AUTH] Firebase Email:', decodedFirebase.email);
 
     const database = getDb();
     let user;
@@ -1009,6 +1038,7 @@ async function login(req, res) {
     user = await database.collection('users').findOne({ firebaseUid: decodedFirebase.uid });
 
     if (!user) {
+      console.log('[AUTH] Creating new user for Firebase UID:', decodedFirebase.uid);
       const newUser = {
         _id: new ObjectId(),
         name: decodedFirebase.name || 'User',
@@ -1023,7 +1053,9 @@ async function login(req, res) {
 
       await database.collection('users').insertOne(newUser);
       user = newUser;
+      console.log('[AUTH] New user created with ID:', user._id.toString());
     } else {
+      console.log('[AUTH] Existing user found:', user._id.toString());
       await database.collection('users').updateOne(
         { _id: user._id },
         {
@@ -1043,6 +1075,9 @@ async function login(req, res) {
       role: user.role,
     });
 
+    console.log('[AUTH] JWT token generated successfully');
+    console.log('[AUTH] Login completed for user:', user.email);
+
     return sendSuccess(res, 'Authentication successful', {
       token,
       user: {
@@ -1054,7 +1089,8 @@ async function login(req, res) {
       },
     });
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('[AUTH] Login error:', error.message);
+    console.error('[AUTH] Error stack:', error.stack);
     return sendError(res, 'Authentication failed', process.env.NODE_ENV === 'development' ? error.message : null);
   }
 }
@@ -1131,7 +1167,7 @@ async function getProfile(req, res) {
   try {
     const database = getDb();
     const user = await database.collection('users').findOne(
-      { _id: req.user.userId },
+      { _id: new ObjectId(req.user.userId) },
       {
         projection: {
           _id: 1,
@@ -1185,7 +1221,7 @@ async function updateProfile(req, res) {
     }
 
     const result = await database.collection('users').updateOne(
-      { _id: req.user.userId },
+      { _id: new ObjectId(req.user.userId) },
       { $set: updateData }
     );
 
@@ -1194,7 +1230,7 @@ async function updateProfile(req, res) {
     }
 
     const updatedUser = await database.collection('users').findOne(
-      { _id: req.user.userId },
+      { _id: new ObjectId(req.user.userId) },
       {
         projection: {
           _id: 1,
@@ -2325,15 +2361,26 @@ const PORT = process.env.PORT || 5000;
 app.use(helmet());
 
 // CORS configuration
-const clientUrls = process.env.CLIENT_URL ? process.env.CLIENT_URL.split(',') : ['http://localhost:5173'];
-app.use(
-  cors({
-    origin: clientUrls,
-    credentials: true,
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  })
-);
+const clientUrls = process.env.CLIENT_URL
+  ? process.env.CLIENT_URL.split(',').map((u) => u.trim())
+  : [];
+const defaultOrigins = ['http://localhost:5173', 'http://localhost:3000'];
+const allowedOrigins = [...new Set([...clientUrls, ...defaultOrigins])];
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  next();
+});
 
 // Rate limiting
 const limiter = rateLimit({
@@ -2497,6 +2544,15 @@ if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
 
 // Export for Vercel serverless
 export default async (req, res) => {
+  console.log('[SERVER] Request received:', {
+    method: req.method,
+    url: req.url,
+    path: req.path,
+    query: req.query
+  });
+
   await initialize();
+
+  // Ensure response is properly handled
   return app(req, res);
 };
