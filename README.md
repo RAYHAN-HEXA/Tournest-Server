@@ -1153,7 +1153,7 @@ curl http://localhost:5000/api/bookings/my \
 ```env
 NODE_ENV=production
 PORT=5000
-MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/tournest
+MONGODB_URI=mongodb+srv://username:password@cluster0.xxxxx.mongodb.net/tournest?retryWrites=true&w=majority
 DB_NAME=tournest
 JWT_SECRET=<generate_with_openssl_rand_base64_32>
 JWT_EXPIRES_IN=7d
@@ -1164,6 +1164,10 @@ CLIENT_URL=https://your-frontend-domain.com
 RATE_LIMIT_WINDOW_MS=900000
 RATE_LIMIT_MAX_REQUESTS=100
 ```
+
+**Note:** Get your MongoDB connection string from [MongoDB Atlas](https://cloud.mongodb.com):
+1. Go to your cluster → **Connect** → **Connect your application**
+2. Copy the connection string and replace `username` and `password` with your credentials
 
 ### Vercel Deployment
 
